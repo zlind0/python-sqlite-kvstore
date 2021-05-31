@@ -1,17 +1,11 @@
-import sqlite3
-
-
+import sqlite3, re
 
 class SQLiteKV:
     con=None
-    cache={}
-    cachesize=1000
-    cacheused=1
-    def __init__(self, namespace, cachesize=1000, in_memory=False):
+    def __init__(self, namespace, in_memory=False):
         self.con=sqlite3.connect(":memory:" if in_memory else namespace+".db")
         self.con.execute("CREATE TABLE IF NOT EXISTS kvtable (Key TEXT UNIQUE, Value TEXT)")
         self.con.commit()
-        self.cachesize=cachesize
 
     def __getitem__(self, Key):
         cur = self.con.cursor()
@@ -62,6 +56,63 @@ class SQLiteKV:
         if res is None: 
             self[Key]=Value
             return Value
+
+    def __enter__(self):
+        return self
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.con.commit()
+        self.con.close()
+
+class SQLiteDict:
+    con=None
+    def __init__(self, namespace, in_memory=False):
+        self.con=sqlite3.connect(":memory:" if in_memory else namespace+".db")
+        self.con.row_factory=sqlite3.Row
+        self.con.execute("CREATE TABLE IF NOT EXISTS dicttable (Key TEXT UNIQUE)")
+        self.con.commit()
+    def put(self, key, value):
+        tablename="dicttable"
+        quoted_values={"Key":key}
+        for k in value.keys():
+            quotedk="\"" + k.replace("\"", "\"\"") + "\""
+            quoted_values[quotedk]=value[k]
+
+        keys=quoted_values.keys()
+
+        stmt="INSERT OR REPLACE INTO %s(%s) VALUES(%s)"%\
+            (tablename, ','.join(keys), ','.join('?'*len(keys)))
+        valueslist=[quoted_values[k] for k in keys]
+        while True:
+            try:
+                self.con.execute(stmt, valueslist)
+                break
+            except sqlite3.OperationalError as e:
+                errmsg=str(e)
+                if 'has no column named' in errmsg:
+                    missingcolname=re.findall(r'has no column named (.*)',errmsg)[0]
+                    missingcolname="\"" + missingcolname.replace("\"", "\"\"") + "\""
+                    if isinstance(quoted_values[missingcolname], int):
+                        self.con.execute(f'ALTER TABLE {tablename} ADD COLUMN {missingcolname} INTEGER')
+                    elif isinstance(quoted_values[missingcolname], float):
+                        self.con.execute(f'ALTER TABLE {tablename} ADD COLUMN {missingcolname} REAL')
+                    else:
+                        self.con.execute(f'ALTER TABLE {tablename} ADD COLUMN {missingcolname} TEXT')
+                    self.con.commit()
+                    print("[Info] Adding missing column", missingcolname)
+                else:
+                    print("[Error]", errmsg)
+    def get(self, key, ret_dict=False):
+        tablename="dicttable"
+        cur = self.con.cursor()
+        cur.execute(f"SELECT * FROM {tablename} WHERE Key=?", (key,))
+        res=cur.fetchone()
+        if res is None: return None
+        elif ret_dict: 
+            res=dict(res)
+            del res["Key"]
+            return res
+        else: 
+            return res
 
     def __enter__(self):
         return self
