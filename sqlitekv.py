@@ -114,6 +114,24 @@ class SQLiteDict:
         else: 
             return res
 
+    def setattr_dict(self, key, attr_dict):
+        tablename="dicttable"
+        quoted_values={}
+        for k in attr_dict.keys():
+            quotedk="\"" + k.replace("\"", "\"\"") + "\""
+            quoted_values[quotedk]=attr_dict[k]
+        keys=quoted_values.keys()
+        stmt="UPDATE %s set %s WHERE Key=?"%(tablename, ",".join([f"{i}=?" for i in keys]))
+        stmtvalues=[quoted_values[k] for k in keys]+[key]
+        print(stmt, stmtvalues)
+        self.con.execute(stmt, stmtvalues)
+    
+    def __getitem__(self, key):
+        return self.get(key)
+
+    def __setitem__(self, key, value):
+        return self.put(key, value)
+
     def __enter__(self):
         return self
     def __exit__(self, exc_type, exc_value, traceback):
