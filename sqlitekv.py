@@ -121,10 +121,31 @@ class SQLiteDict:
             quotedk="\"" + k.replace("\"", "\"\"") + "\""
             quoted_values[quotedk]=attr_dict[k]
         keys=quoted_values.keys()
+        self.con.execute(f"INSERT OR IGNORE INTO {tablename}(Key) VALUES(?)", (key, ))
         stmt="UPDATE %s set %s WHERE Key=?"%(tablename, ",".join([f"{i}=?" for i in keys]))
         stmtvalues=[quoted_values[k] for k in keys]+[key]
-        print(stmt, stmtvalues)
-        self.con.execute(stmt, stmtvalues)
+#         print(stmt, stmtvalues)
+        #while True:
+        try:
+            self.con.execute(stmt, stmtvalues)
+            # break
+        except sqlite3.OperationalError as e:
+            errmsg=str(e)
+            if 'no such column' in errmsg:
+                missingcolname=re.findall(r'no such column: (.*)',errmsg)[0]
+                print(errmsg)
+                print(missingcolname)
+                missingcolname="\"" + missingcolname.replace("\"", "\"\"") + "\""
+                if isinstance(quoted_values[missingcolname], int):
+                    self.con.execute(f'ALTER TABLE {tablename} ADD COLUMN {missingcolname} INTEGER')
+                elif isinstance(quoted_values[missingcolname], float):
+                    self.con.execute(f'ALTER TABLE {tablename} ADD COLUMN {missingcolname} REAL')
+                else:
+                    self.con.execute(f'ALTER TABLE {tablename} ADD COLUMN {missingcolname} TEXT')
+                self.con.commit()
+                print("[Info] Adding missing column", missingcolname)
+            else:
+                print("[Error]", errmsg)
     
     def __getitem__(self, key):
         return self.get(key)
